@@ -36,3 +36,20 @@ export function getAlbum(spotify: SpotifyApi, uri: string) {
     verboseReporter()
   );
 }
+
+export function getDevices(spotify: SpotifyApi) {
+  return cachified(
+    {
+      key: `devices`,
+      cache: lruCache,
+      async getFreshValue() {
+        return spotify.player.getAvailableDevices();
+      },
+      /* 30 seconds until cache gets invalid
+       * This cache should be overwritten if the `device` field is different when we request the player state
+       */
+      ttl: 30 * 1000,
+    },
+    verboseReporter()
+  );
+}

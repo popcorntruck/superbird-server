@@ -11,7 +11,8 @@ export class FixedResponseDeserializer extends DefaultResponseDeserializer {
      */
     const brokenUrls = ["/v1/me/player/play", "/v1/me/player/pause"];
 
-    if (brokenUrls.includes(url.pathname)) {
+    // If there is an error, return the error object
+    if (brokenUrls.includes(url.pathname) && response.status === 200) {
       return Promise.resolve({} as TReturnType);
     }
 
