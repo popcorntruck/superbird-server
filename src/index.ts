@@ -1,26 +1,10 @@
 import { SpotifyApi } from "@spotify/web-api-ts-sdk";
 import albumsList from "./data/albums_list.json";
 import { doAuthFlow } from "./spotify-auth";
-
-// ImageId -> Base64 Data
-const imageBase64Cache = new Map<string, string>();
-
-const useCachedOrFetchImage = async (imageId: string) => {
-  if (imageBase64Cache.has(imageId)) {
-    return imageBase64Cache.get(imageId) as string;
-  }
-
-  const imageReq = await fetch(`https://i.scdn.co/image/${imageId}`);
-
-  console.log(`Fetching image ${imageId}`);
-
-  // convert image to base64
-  const imageBuffer = await imageReq.arrayBuffer();
-  const imageBase64 = Buffer.from(imageBuffer).toString("base64");
-
-  imageBase64Cache.set(imageId, imageBase64);
-  return imageBase64;
-};
+import { getImageBase64, selectImageIdFromList } from "./image";
+import { firstOr, mapFirstOr } from "./utils";
+import { getActiveConnectDeviceId } from "./devices";
+import type { InterAppActionRequest } from "./interapp-actions";
 
 const spotifyAccessToken = await doAuthFlow();
 
@@ -32,13 +16,17 @@ const spotifyApi = SpotifyApi.withAccessToken(
 const getFormattedPlayerState = async (deviceId?: string) => {
   const currentSpotifyPlayerState = await spotifyApi.player.getPlaybackState();
 
-  if ("show" in currentSpotifyPlayerState.item) {
+  if (!currentSpotifyPlayerState || "show" in currentSpotifyPlayerState.item) {
     // current spotify player state is a podcast, ignoring here
     return;
   }
 
   const item = currentSpotifyPlayerState.item;
-  const firstArtist = item.artists[0];
+  const firstArtist = firstOr(item.artists, {
+    name: "Unknown Artist",
+    uri: "spotify:artist",
+    type: "artist",
+  });
   const playerStatePayload = {
     context_uri: currentSpotifyPlayerState.context?.uri ?? "spotify:collection",
     context_title: "Your Library",
@@ -70,10 +58,7 @@ const getFormattedPlayerState = async (deviceId?: string) => {
         type: artist.type,
       })),
       duration_ms: item.duration_ms,
-      image_id: item.album.images[0].url.replace(
-        "https://i.scdn.co/image/",
-        ""
-      ),
+      image_id: selectImageIdFromList(item.album.images),
       is_episode: false,
       is_podcast: false,
       name: item.name,
@@ -139,6 +124,10 @@ const server = Bun.serve<{ authToken: string }>({
     },
     async message(ws, message) {
       const msgJson = JSON.parse(message.toString());
+
+      if (msgJson.method === "com.spotify.superbird.instrumentation.log") {
+        return;
+      }
       console.log(`Received ${message}`);
       // send back a message
 
@@ -166,20 +155,22 @@ const server = Bun.serve<{ authToken: string }>({
 
       // Interapp Action
       if (msgJson.msgId) {
-        if (msgJson.method === "com.spotify.superbird.get_home") {
+        const action = msgJson as InterAppActionRequest;
+        if (action.method === "com.spotify.superbird.get_home") {
           const children = albumsList.items.map((album) => ({
             title: album.album.name,
-            subtitle: album.album.artists[0].name,
-            uri: album.album.uri,
-            image_id: album.album.images[0].url.replace(
-              "https://i.scdn.co/image/",
-              ""
+            subtitle: mapFirstOr(
+              album.album.artists,
+              (artist) => artist.name,
+              "Unknown Artist"
             ),
+            uri: album.album.uri,
+            image_id: selectImageIdFromList(album.album.images),
           }));
           ws.send(
             JSON.stringify({
               type: "call_result",
-              msgId: msgJson.msgId,
+              msgId: action.msgId,
               payload: {
                 items: [
                   {
@@ -192,7 +183,7 @@ const server = Bun.serve<{ authToken: string }>({
               },
             })
           );
-        } else if (msgJson.method === "com.spotify.superbird.permissions") {
+        } else if (action.method === "com.spotify.superbird.permissions") {
           // ws.send(
           //   JSON.stringify({
           //     type: "call_result",
@@ -203,31 +194,31 @@ const server = Bun.serve<{ authToken: string }>({
           //     },
           //   })
           // );
-        } else if (msgJson.method === "com.spotify.get_image") {
-          const imageBase64 = await useCachedOrFetchImage(msgJson.args.id);
+        } else if (action.method === "com.spotify.get_image") {
+          const imageBase64 = await getImageBase64(action.args.id);
           ws.send(
             JSON.stringify({
               type: "call_result",
-              msgId: msgJson.msgId,
+              msgId: action.msgId,
               payload: {
                 image_data: imageBase64,
               },
             })
           );
-        } else if (msgJson.method === "com.spotify.get_thumbnail_image") {
-          const imageBase64 = await useCachedOrFetchImage(msgJson.args.id);
+        } else if (action.method === "com.spotify.get_thumbnail_image") {
+          const imageBase64 = await getImageBase64(action.args.id);
           ws.send(
             JSON.stringify({
               type: "call_result",
-              msgId: msgJson.msgId,
+              msgId: action.msgId,
               payload: {
                 image_data: imageBase64,
               },
             })
           );
-        } else if (msgJson.method === "com.spotify.get_children_of_item") {
+        } else if (action.method === "com.spotify.get_children_of_item") {
           const album = albumsList.items.find(
-            (album) => album.album.uri === msgJson.args.parent_id
+            (album) => album.album.uri === action.args.parent_id
           );
 
           if (!album) {
@@ -239,10 +230,8 @@ const server = Bun.serve<{ authToken: string }>({
             total: album.album.tracks.total,
             items: album.album.tracks.items.map((track) => ({
               id: track.id,
-              image_id: album.album.images[0].url.replace(
-                "https://i.scdn.co/image/",
-                ""
-              ),
+              image_id: selectImageIdFromList(album.album.images),
+
               playable: true,
               subtitle: track.artists.map((artist) => artist.name).join(", "),
               title: track.name,
@@ -259,30 +248,24 @@ const server = Bun.serve<{ authToken: string }>({
           ws.send(
             JSON.stringify({
               type: "call_result",
-              msgId: msgJson.msgId,
+              msgId: action.msgId,
               payload,
             })
           );
-        } else if (msgJson.method === "com.spotify.play_uri") {
-          const firstAvailableDevice =
-            await spotifyApi.player.getAvailableDevices();
-          if (!firstAvailableDevice.devices.length) {
-            return;
-          }
-
-          const deviceId = firstAvailableDevice.devices[0].id;
+        } else if (action.method === "com.spotify.play_uri") {
+          const deviceId = await getActiveConnectDeviceId(spotifyApi);
 
           if (!deviceId) {
             return;
           }
-          console.log(`Playing ${msgJson.args.uri} on ${deviceId}`);
+          console.log(`Playing ${action.args.uri} on ${deviceId}`);
           await spotifyApi.player.startResumePlayback(
             deviceId,
-            msgJson.args.contextURI,
-            // [msgJson.args.uri],
+            action.args.contextURI,
+            // [action.args.uri],
             undefined,
             {
-              uri: msgJson.args.skipToURI,
+              uri: action.args.skipToURI,
             }
           );
 
@@ -297,16 +280,9 @@ const server = Bun.serve<{ authToken: string }>({
               payload: playerStatePayload,
             })
           );
-        } else if (msgJson.method === "com.spotify.set_playback_speed") {
-          const isPaused = msgJson.args.playback_speed === 0;
-
-          const firstAvailableDevice =
-            await spotifyApi.player.getAvailableDevices();
-          if (!firstAvailableDevice.devices.length) {
-            return;
-          }
-
-          const deviceId = firstAvailableDevice.devices[0].id;
+        } else if (action.method === "com.spotify.set_playback_speed") {
+          const isPaused = action.args.playback_speed === 0;
+          const deviceId = await getActiveConnectDeviceId(spotifyApi);
 
           if (!deviceId) {
             return;

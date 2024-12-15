@@ -1,5 +1,5 @@
 import { log, spinner } from "@clack/prompts";
-import type { AccessToken } from "@spotify/web-api-ts-sdk";
+import { type AccessToken } from "@spotify/web-api-ts-sdk";
 
 const sha256 = async (plain: string) => {
   const encoder = new TextEncoder();
@@ -19,15 +19,16 @@ const base64encode = (input: ArrayBuffer) => {
     .replace(/\//g, "_");
 };
 
-type cachedAuthData = {
-  token: AccessToken;
+type CachedAuthData = {
+  token?: AccessToken | null;
   time: number;
 };
 
 export const doAuthFlow = async () => {
   const cachedAuthData = Bun.file("./auth-data.json");
   const hasCachedAuthData = await cachedAuthData.exists();
-  if (!hasCachedAuthData) {
+
+  const doAuthAndWrite = async () => {
     const authData = await doInnerAuthFlow();
     await Bun.write(
       cachedAuthData,
@@ -38,18 +39,19 @@ export const doAuthFlow = async () => {
     );
 
     return authData;
+  };
+
+  if (!hasCachedAuthData) {
+    return doAuthAndWrite();
   }
 
-  const authData = (await cachedAuthData.json()) as unknown as cachedAuthData;
-  if (Date.now() > authData.time + authData.token.expires_in * 1000) {
-    const authData = doInnerAuthFlow();
-    await Bun.write(
-      cachedAuthData,
-      JSON.stringify({
-        token: authData,
-        time: Date.now(),
-      })
-    );
+  const authData = (await cachedAuthData.json()) as unknown as CachedAuthData;
+
+  if (
+    !authData.token?.access_token ||
+    Date.now() > authData.time + authData.token?.expires_in * 1000
+  ) {
+    return doAuthAndWrite();
   }
 
   log.success("Using cached authentication data");

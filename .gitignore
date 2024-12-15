@@ -177,3 +177,4 @@ dist
 .env
 auth-data.json
 albums_list.json
+cache/*
