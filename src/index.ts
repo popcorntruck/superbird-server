@@ -5,12 +5,16 @@ import { firstOr, mapFirstOr } from "./utils";
 import { getActiveConnectDeviceId } from "./devices";
 import type { InterAppActionRequest } from "./interapp-actions";
 import { getAlbum, getAlbumsList } from "./queries";
+import { FixedResponseDeserializer } from "./fixed-response-deserializer";
 
 const spotifyAccessToken = await doAuthFlow();
 
 const spotifyApi = SpotifyApi.withAccessToken(
   process.env.SPOTIFY_CLIENT_ID || "",
-  spotifyAccessToken
+  spotifyAccessToken,
+  {
+    deserializer: new FixedResponseDeserializer(),
+  }
 );
 
 const getFormattedPlayerState = async (deviceId?: string) => {

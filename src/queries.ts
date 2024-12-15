@@ -13,9 +13,9 @@ export function getAlbumsList(spotify: SpotifyApi) {
       async getFreshValue() {
         return spotify.currentUser.albums.savedAlbums(25, undefined, MARKET);
       },
-      /* 5 minutes until cache gets invalid
+      /* 15 minutes until cache gets invalid
        * Optional, defaults to Infinity */
-      ttl: 120_000,
+      ttl: 900_000,
     },
     verboseReporter()
   );
@@ -29,9 +29,9 @@ export function getAlbum(spotify: SpotifyApi, uri: string) {
       async getFreshValue() {
         return spotify.albums.get(idFromUri(uri), MARKET);
       },
-      /* 5 minutes until cache gets invalid
+      /* 15 minutes until cache gets invalid
        * Optional, defaults to Infinity */
-      ttl: 120_000,
+      ttl: 900_000,
     },
     verboseReporter()
   );
