@@ -42,8 +42,18 @@ export function getDevices(spotify: SpotifyApi) {
     {
       key: `devices`,
       cache: lruCache,
-      async getFreshValue() {
-        return spotify.player.getAvailableDevices();
+      async getFreshValue(ctx) {
+        const data = await spotify.player.getAvailableDevices();
+        const hasNoneOrNoActiveDevices =
+          data.devices.length === 0 ||
+          data.devices.every((device) => !device.is_active);
+
+        if (hasNoneOrNoActiveDevices) {
+          // Prevent caching this value.
+          ctx.metadata.ttl = -1;
+        }
+
+        return data;
       },
       /* 30 seconds until cache gets invalid
        * This cache should be overwritten if the `device` field is different when we request the player state

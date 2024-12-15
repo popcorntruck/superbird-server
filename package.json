@@ -16,6 +16,7 @@
     "@epic-web/cachified": "^5.2.0",
     "@spotify/web-api-ts-sdk": "^1.2.0",
     "lru-cache": "^11.0.2",
+    "sharp": "^0.33.5",
     "valibot": "^1.0.0-beta.9"
   }
 }
