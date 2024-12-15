@@ -1,10 +1,10 @@
 import { SpotifyApi } from "@spotify/web-api-ts-sdk";
-import albumsList from "./data/albums_list.json";
 import { doAuthFlow } from "./spotify-auth";
 import { getImageBase64, selectImageIdFromList } from "./image";
 import { firstOr, mapFirstOr } from "./utils";
 import { getActiveConnectDeviceId } from "./devices";
 import type { InterAppActionRequest } from "./interapp-actions";
+import { getAlbum, getAlbumsList } from "./queries";
 
 const spotifyAccessToken = await doAuthFlow();
 
@@ -157,7 +157,8 @@ const server = Bun.serve<{ authToken: string }>({
       if (msgJson.msgId) {
         const action = msgJson as InterAppActionRequest;
         if (action.method === "com.spotify.superbird.get_home") {
-          const children = albumsList.items.map((album) => ({
+          const savedAlbums = await getAlbumsList(spotifyApi);
+          const children = savedAlbums.items.map((album) => ({
             title: album.album.name,
             subtitle: mapFirstOr(
               album.album.artists,
@@ -175,9 +176,9 @@ const server = Bun.serve<{ authToken: string }>({
                 items: [
                   {
                     title: "Albums",
-                    uri: "spotify:collection",
+                    uri: "spotify:collection:albums",
                     children: children,
-                    total: children.length,
+                    total: savedAlbums.total,
                   },
                 ],
               },
@@ -217,9 +218,7 @@ const server = Bun.serve<{ authToken: string }>({
             })
           );
         } else if (action.method === "com.spotify.get_children_of_item") {
-          const album = albumsList.items.find(
-            (album) => album.album.uri === action.args.parent_id
-          );
+          const album = await getAlbum(spotifyApi, action.args.parent_id);
 
           if (!album) {
             return;
@@ -227,10 +226,10 @@ const server = Bun.serve<{ authToken: string }>({
 
           const payload = {
             success: true,
-            total: album.album.tracks.total,
-            items: album.album.tracks.items.map((track) => ({
+            total: album.tracks.total,
+            items: album.tracks.items.map((track) => ({
               id: track.id,
-              image_id: selectImageIdFromList(album.album.images),
+              image_id: selectImageIdFromList(album.images),
 
               playable: true,
               subtitle: track.artists.map((artist) => artist.name).join(", "),

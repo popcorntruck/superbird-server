@@ -15,3 +15,7 @@ export function mapFirstOr<T, MappedT, F = null>(
 ): MappedT | F {
   return arr.length > 0 ? map(arr[0]) : fallback;
 }
+
+export function idFromUri(uri: string) {
+  return uri.split(":").pop() ?? "";
+}
