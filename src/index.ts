@@ -1,9 +1,8 @@
 import { SpotifyApi } from "@spotify/web-api-ts-sdk";
 import { doAuthFlow } from "./spotify-auth";
-import { selectImageIdFromList } from "./image";
-import { firstOr } from "./utils";
 import { FixedResponseDeserializer } from "./fixed-response-deserializer";
 import { createInterAppActionHandler } from "./handlers";
+import { PlayerStateManager } from "./player-state-manager";
 
 const spotifyAccessToken = await doAuthFlow();
 
@@ -15,63 +14,11 @@ const spotifyApi = SpotifyApi.withAccessToken(
   }
 );
 
-const actionHandler = createInterAppActionHandler({ spotifyApi });
-const getFormattedPlayerState = async (deviceId?: string) => {
-  const currentSpotifyPlayerState = await spotifyApi.player.getPlaybackState();
-
-  if (!currentSpotifyPlayerState || "show" in currentSpotifyPlayerState.item) {
-    // current spotify player state is a podcast, ignoring here
-    return;
-  }
-
-  const item = currentSpotifyPlayerState.item;
-  const firstArtist = firstOr(item.artists, {
-    name: "Unknown Artist",
-    uri: "spotify:artist",
-    type: "artist",
-  });
-  const playerStatePayload = {
-    context_uri: currentSpotifyPlayerState.context?.uri ?? "spotify:collection",
-    context_title: "Your Library",
-    is_paused: !currentSpotifyPlayerState.is_playing,
-    is_paused_bool: !currentSpotifyPlayerState.is_playing,
-    playback_options: {
-      repeat: currentSpotifyPlayerState.repeat_state,
-      shuffle: currentSpotifyPlayerState.shuffle_state,
-    },
-    playback_position: currentSpotifyPlayerState.progress_ms,
-    playback_speed: 1,
-    playing_remotely: true,
-    remote_device_id: deviceId ?? "",
-    type: "track",
-    track: {
-      album: {
-        name: item.album.name,
-        type: item.album.type,
-        uri: item.album.uri,
-      },
-      artist: {
-        name: firstArtist.name ?? "Unknown Artist",
-        uri: firstArtist.uri ?? "spotify:artist",
-        type: firstArtist.type ?? "artist",
-      },
-      artists: item.artists.map((artist) => ({
-        name: artist.name,
-        uri: artist.uri,
-        type: artist.type,
-      })),
-      duration_ms: item.duration_ms,
-      image_id: selectImageIdFromList(item.album.images),
-      is_episode: false,
-      is_podcast: false,
-      name: item.name,
-      saved: true,
-      uri: item.uri,
-    },
-  };
-
-  return playerStatePayload;
-};
+const playerStateManager = new PlayerStateManager(spotifyApi);
+const actionHandler = createInterAppActionHandler({
+  spotifyApi,
+  playerStateManager,
+});
 
 const server = Bun.serve<{ authToken: string }>({
   fetch(req, server) {
@@ -116,7 +63,7 @@ const server = Bun.serve<{ authToken: string }>({
 
       setTimeout(async () => {
         // send initial player state
-        const playerStatePayload = await getFormattedPlayerState();
+        const playerStatePayload = playerStateManager.formattedPlayerState;
         ws.send(
           JSON.stringify({
             type: "com.spotify.superbird.player_state",
@@ -124,6 +71,19 @@ const server = Bun.serve<{ authToken: string }>({
           })
         );
       }, 1000);
+
+      playerStateManager.events.on(
+        "playerStateChanged",
+        ({ state, formatted }) => {
+          console.log("playerStateChanged", state.item.uri);
+          ws.send(
+            JSON.stringify({
+              type: "com.spotify.superbird.player_state",
+              payload: formatted,
+            })
+          );
+        }
+      );
     },
     async message(ws, message) {
       const msgJson = JSON.parse(message.toString());

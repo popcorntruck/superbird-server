@@ -5,14 +5,20 @@ import { getImageBase64, selectImageIdFromList } from "./image";
 import { mapFirstOr } from "./utils";
 import * as v from "valibot";
 import { getActiveConnectDeviceId } from "./devices";
-import { getFormattedPlayerState } from "./player-state";
+import { sleep } from "bun";
+import type { PlayerStateManager } from "./player-state-manager";
 
 export function createInterAppActionHandler({
   spotifyApi,
+  playerStateManager,
 }: {
   spotifyApi: SpotifyApi;
+  playerStateManager: PlayerStateManager;
 }) {
-  const actionHandler = new InterAppActionHandler({ spotifyApi });
+  const actionHandler = new InterAppActionHandler({
+    spotifyApi,
+    playerStateManager,
+  });
 
   actionHandler.on("com.spotify.superbird.get_home", {
     async callback(input, context) {
@@ -122,39 +128,10 @@ export function createInterAppActionHandler({
       skipToURI: v.nullish(v.string()),
     }),
     async callback(input, context, { ws }) {
-      const deviceId = await getActiveConnectDeviceId(spotifyApi);
-
-      if (!deviceId) {
-        return;
-      }
-
-      console.log(`Playing ${input.uri} on ${deviceId}`);
-      await spotifyApi.player.startResumePlayback(
-        deviceId,
-        input.contextURI,
-        // [action.args.uri],
-        undefined,
-        input.skipToURI
-          ? {
-              uri: input.skipToURI,
-            }
-          : undefined
-      );
-
-      // wait for connect state to update
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const playerStatePayload = await getFormattedPlayerState(
-        context.spotifyApi,
-        deviceId
-      );
-
-      ws.send(
-        JSON.stringify({
-          type: "com.spotify.superbird.player_state",
-          payload: playerStatePayload,
-        })
-      );
+      await context.playerStateManager.playUri({
+        contextUri: input.contextURI,
+        skipToUri: input.skipToURI,
+      });
 
       return NO_RESPONSE;
     },
@@ -166,32 +143,8 @@ export function createInterAppActionHandler({
     }),
     async callback(input, context, { ws }) {
       const isPaused = input.playback_speed === 0;
-      const deviceId = await getActiveConnectDeviceId(spotifyApi);
 
-      if (!deviceId) {
-        return;
-      }
-
-      if (isPaused) {
-        await spotifyApi.player.pausePlayback(deviceId);
-      } else {
-        await spotifyApi.player.startResumePlayback(deviceId);
-      }
-
-      // wait for connect state to update
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const playerStatePayload = await getFormattedPlayerState(
-        context.spotifyApi,
-        deviceId
-      );
-
-      ws.send(
-        JSON.stringify({
-          type: "com.spotify.superbird.player_state",
-          payload: playerStatePayload,
-        })
-      );
+      await context.playerStateManager.setIsPlaying(!isPaused);
 
       return NO_RESPONSE;
     },

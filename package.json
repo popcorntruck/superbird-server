@@ -15,7 +15,10 @@
     "@clack/prompts": "^0.8.2",
     "@epic-web/cachified": "^5.2.0",
     "@spotify/web-api-ts-sdk": "^1.2.0",
+    "deep-object-diff": "^1.1.9",
+    "immer": "^10.1.1",
     "lru-cache": "^11.0.2",
+    "mitt": "^3.0.1",
     "sharp": "^0.33.5",
     "valibot": "^1.0.0-beta.9"
   }

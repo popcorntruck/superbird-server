@@ -1,37 +1,32 @@
-import type { SpotifyApi } from "@spotify/web-api-ts-sdk";
+import type { PlaybackState } from "@spotify/web-api-ts-sdk";
 import { firstOr } from "./utils";
 import { selectImageIdFromList } from "./image";
 
-export async function getFormattedPlayerState(
-  spotifyApi: SpotifyApi,
-  deviceId?: string
-) {
-  const currentSpotifyPlayerState = await spotifyApi.player.getPlaybackState();
-
-  if (!currentSpotifyPlayerState || "show" in currentSpotifyPlayerState.item) {
+export function formatPlayerStateForFrontend(state: PlaybackState) {
+  if (!state || "show" in state.item) {
     // current spotify player state is a podcast, ignoring here
-    return;
+    return null;
   }
 
-  const item = currentSpotifyPlayerState.item;
+  const item = state.item;
   const firstArtist = firstOr(item.artists, {
     name: "Unknown Artist",
     uri: "spotify:artist",
     type: "artist",
   });
   const playerStatePayload = {
-    context_uri: currentSpotifyPlayerState.context?.uri ?? "spotify:collection",
+    context_uri: state.context?.uri ?? "spotify:collection",
     context_title: "Your Library",
-    is_paused: !currentSpotifyPlayerState.is_playing,
-    is_paused_bool: !currentSpotifyPlayerState.is_playing,
+    is_paused: !state.is_playing,
+    is_paused_bool: !state.is_playing,
     playback_options: {
-      repeat: currentSpotifyPlayerState.repeat_state,
-      shuffle: currentSpotifyPlayerState.shuffle_state,
+      repeat: state.repeat_state,
+      shuffle: state.shuffle_state,
     },
-    playback_position: currentSpotifyPlayerState.progress_ms,
+    playback_position: state.progress_ms,
     playback_speed: 1,
     playing_remotely: true,
-    remote_device_id: deviceId ?? "",
+    remote_device_id: state.device.id ?? "",
     type: "track",
     track: {
       album: {
@@ -61,3 +56,7 @@ export async function getFormattedPlayerState(
 
   return playerStatePayload;
 }
+
+export type FrontendFormattedPlayerState = ReturnType<
+  typeof formatPlayerStateForFrontend
+>;
